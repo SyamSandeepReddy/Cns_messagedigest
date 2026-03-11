@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Message Integrity Checker</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --bg:#080c10; --surface:#0d1117; --surface2:#161b22; --surface3:#1c2230;
+  --border:#30363d; --border-glow:#58a6ff40;
+  --text:#e6edf3; --text-muted:#7d8590; --text-dim:#484f58;
+  --accent:#58a6ff; --accent2:#79c0ff;
+  --green:#3fb950; --green-bg:#0d2116; --green-border:#238636;
+  --red:#f85149;   --red-bg:#1f0d0d;   --red-border:#6e1a18;
+  --yellow:#d29922;--yellow-bg:#1f1800;--yellow-border:#634b0d;
+  --mono:'Space Mono',monospace; --sans:'Syne',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;overflow-x:hidden}
+
+body::before{
+  content:'';position:fixed;inset:0;
+  background-image:linear-gradient(rgba(88,166,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(88,166,255,.03) 1px,transparent 1px);
+  background-size:40px 40px;pointer-events:none;z-index:0
+}
+body::after{
+  content:'';position:fixed;top:-50%;left:-50%;width:200%;height:200%;
+  background:radial-gradient(ellipse at 30% 20%,rgba(88,166,255,.04) 0%,transparent 50%),
+             radial-gradient(ellipse at 70% 80%,rgba(121,192,255,.03) 0%,transparent 50%);
+  pointer-events:none;z-index:0;animation:drift 20s ease-in-out infinite alternate
+}
+@keyframes drift{from{transform:translate(0,0)}to{transform:translate(2%,2%)}}
+
+.wrapper{position:relative;z-index:1;max-width:980px;margin:0 auto;padding:40px 24px 80px}
+
+/* ── Header ── */
+header{text-align:center;margin-bottom:44px}
+.logo-badge{
+  display:inline-flex;align-items:center;gap:8px;
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:100px;padding:6px 16px 6px 8px;margin-bottom:20px;
+  font-family:var(--mono);font-size:11px;color:var(--text-muted);letter-spacing:.08em
+}
+.logo-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 2s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1;box-shadow:0 0 8px var(--green)}50%{opacity:.5;box-shadow:0 0 3px var(--green)}}
+h1{font-size:clamp(26px,5vw,44px);font-weight:800;letter-spacing:-.03em;line-height:1.1;margin-bottom:10px}
+h1 span{background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.subtitle{font-size:13px;color:var(--text-muted);font-family:var(--mono);letter-spacing:.02em}
+
+/* ── Algo bar ── */
+.algo-bar{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:24px;flex-wrap:wrap}
+.algo-toggle{display:flex;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:3px;gap:3px}
+.algo-btn{padding:7px 18px;border:none;border-radius:6px;font-family:var(--mono);font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;letter-spacing:.05em;color:var(--text-muted);background:transparent}
+.algo-btn.active{background:var(--accent);color:#000;box-shadow:0 0 14px rgba(88,166,255,.4)}
+.algo-btn:not(.active):hover{color:var(--text);background:var(--surface3)}
+.algo-info{font-family:var(--mono);font-size:10px;color:var(--text-dim)}
+
+/* ── Intercept bar ── */
+.intercept-bar{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:30px;flex-wrap:wrap}
+.intercept-toggle{
+  display:flex;align-items:center;gap:8px;
+  background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 14px;
+  cursor:pointer;transition:all .2s;font-family:var(--mono);font-size:11px;color:var(--text-muted);user-select:none
+}
+.intercept-toggle:hover{border-color:var(--red-border);color:var(--red)}
+.intercept-toggle.on{background:var(--red-bg);border-color:var(--red-border);color:var(--red)}
+.intercept-led{width:7px;height:7px;border-radius:50%;background:var(--text-dim);transition:all .2s;flex-shrink:0}
+.intercept-toggle.on .intercept-led{background:var(--red);box-shadow:0 0 6px var(--red);animation:blink .8s ease-in-out infinite}
+
+/* ── Main layout ── */
+.main-layout{display:grid;grid-template-columns:1fr 72px 1fr;gap:0;align-items:start;margin-bottom:28px}
+@media(max-width:680px){
+  .main-layout{grid-template-columns:1fr}
+  .channel-col{transform:rotate(90deg);margin:12px auto;width:72px}
+}
+
+/* ── Cards ── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;overflow:hidden;transition:border-color .3s}
+.card:hover{border-color:var(--border-glow)}
+.card-header{display:flex;align-items:center;gap:10px;padding:15px 20px;border-bottom:1px solid var(--border);background:var(--surface2)}
+.card-icon{width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.card-icon.sender{background:rgba(88,166,255,.15)}
+.card-icon.receiver{background:rgba(63,185,80,.12)}
+.card-title{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.card-sub{font-family:var(--mono);font-size:9.5px;color:var(--text-dim);margin-top:1px;letter-spacing:.05em}
+.card-body{padding:18px 20px}
+
+/* ── Form ── */
+.field{margin-bottom:13px}
+label{display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px}
+
+textarea{
+  width:100%;background:var(--surface2);border:1px solid var(--border);
+  border-radius:8px;color:var(--text);font-family:var(--mono);font-size:12.5px;
+  padding:11px 13px;resize:vertical;transition:border-color .2s,box-shadow .2s;
+  outline:none;line-height:1.6
+}
+textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(88,166,255,.1)}
+textarea::placeholder{color:var(--text-dim)}
+
+/* ── Sender digest display ── */
+.digest-box{
+  background:var(--surface3);border:1px solid var(--border);border-radius:8px;
+  padding:11px 13px;font-family:var(--mono);font-size:11px;color:var(--accent2);
+  word-break:break-all;line-height:1.7;min-height:44px;letter-spacing:.04em
+}
+.digest-box.empty{color:var(--text-dim);font-style:italic}
+@keyframes shimmer{from{background-position:-200% 0}to{background-position:200% 0}}
+.digest-box.generating{
+  background:linear-gradient(90deg,var(--surface3) 25%,var(--surface2) 50%,var(--surface3) 75%);
+  background-size:200% 100%;animation:shimmer .8s ease-in-out
+}
+
+/* ── Appended preview (sender side) ── */
+.appended-preview{
+  background:var(--surface3);border:1px solid var(--border);border-radius:10px;
+  overflow:hidden;margin-bottom:0
+}
+.appended-preview-header{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 13px;background:var(--surface2);border-bottom:1px solid var(--border)
+}
+.preview-label{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-muted)}
+.preview-badge{
+  font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:3px;
+  background:rgba(88,166,255,.1);color:var(--accent2);letter-spacing:.06em;margin-left:auto
+}
+.appended-content{
+  padding:11px 13px;font-family:var(--mono);font-size:11.5px;
+  line-height:1.75;word-break:break-all;color:var(--text-dim);font-style:italic
+}
+.appended-content.ready{color:var(--text);font-style:normal}
+
+/* Highlight the digest part inside appended preview */
+.msg-part{color:var(--text)}
+.sep-part{color:var(--text-dim);user-select:none}
+.dgst-part{color:var(--accent2)}
+
+/* ── Receiver packet textarea ── */
+/* Single big editable textarea showing "msg || digest" */
+.recv-packet-wrap{
+  position:relative;margin-bottom:13px
+}
+.recv-header-row{
+  display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:6px
+}
+.recv-header-row label{margin-bottom:0}
+.recv-edit-hint{
+  font-family:var(--mono);font-size:9px;color:var(--text-dim);letter-spacing:.04em;
+  display:none;align-items:center;gap:4px
+}
+.recv-edit-hint.show{display:inline-flex}
+.edit-dot{width:5px;height:5px;border-radius:50%;background:var(--yellow);box-shadow:0 0 5px var(--yellow)}
+
+.recv-textarea{
+  width:100%;background:var(--surface2);border:1px solid var(--border);
+  border-radius:10px;color:var(--text);font-family:var(--mono);font-size:12px;
+  padding:13px 14px;resize:vertical;transition:border-color .2s,box-shadow .2s;
+  outline:none;line-height:1.75;min-height:130px
+}
+.recv-textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(88,166,255,.1)}
+.recv-textarea::placeholder{color:var(--text-dim);font-style:italic}
+.recv-textarea:disabled{cursor:not-allowed;opacity:.5}
+
+/* Format guide below textarea */
+.format-guide{
+  display:none;margin-top:6px;
+  font-family:var(--mono);font-size:9.5px;color:var(--text-dim);
+  line-height:1.6;padding:8px 12px;background:var(--surface3);
+  border:1px solid var(--border);border-radius:7px
+}
+.format-guide.show{display:block}
+.format-guide code{color:var(--accent2)}
+
+/* Reset link */
+.reset-link{
+  display:none;font-family:var(--mono);font-size:10px;color:var(--text-dim);
+  margin-top:6px;cursor:pointer;letter-spacing:.04em;
+  text-decoration:underline;background:none;border:none;padding:0;transition:color .2s
+}
+.reset-link:hover{color:var(--text-muted)}
+.reset-link.show{display:inline-block}
+
+/* ── Buttons ── */
+.btn{
+  width:100%;padding:11px 16px;border:none;border-radius:9px;
+  font-family:var(--sans);font-size:13px;font-weight:700;letter-spacing:.03em;
+  cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:7px;margin-top:4px
+}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+.btn-primary{background:var(--accent);color:#000;box-shadow:0 4px 16px rgba(88,166,255,.2)}
+.btn-primary:hover:not(:disabled){background:var(--accent2);box-shadow:0 4px 24px rgba(88,166,255,.35);transform:translateY(-1px)}
+.btn-send{background:#0e1f3d;color:#79c0ff;border:1px solid rgba(88,166,255,.25);box-shadow:0 4px 16px rgba(88,166,255,.08);margin-top:10px}
+.btn-send:hover:not(:disabled){background:#152b56;border-color:rgba(88,166,255,.45);box-shadow:0 4px 22px rgba(88,166,255,.2);transform:translateY(-1px)}
+.btn-send.sent{color:var(--green);border-color:var(--green-border);background:var(--green-bg)}
+.btn-verify{background:linear-gradient(135deg,#1a7f37,#2ea043);color:#fff;box-shadow:0 4px 16px rgba(63,185,80,.15)}
+.btn-verify:hover:not(:disabled){background:linear-gradient(135deg,#238636,#3fb950);box-shadow:0 4px 24px rgba(63,185,80,.3);transform:translateY(-1px)}
+
+/* ── Status badge ── */
+.recv-badge{
+  display:none;align-items:center;gap:6px;padding:5px 11px;border-radius:100px;margin-bottom:12px;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;
+  border:1px solid var(--green-border);background:var(--green-bg);color:var(--green);
+  animation:fadeUp .4s ease
+}
+.recv-badge.show{display:inline-flex}
+.recv-badge.tampered{border-color:var(--red-border);background:var(--red-bg);color:var(--red)}
+.badge-dot{width:6px;height:6px;border-radius:50%;background:currentColor;animation:blink 1.2s ease-in-out infinite}
+@keyframes fadeUp{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── Channel ── */
+.channel-col{display:flex;flex-direction:column;align-items:center;justify-content:center;padding-top:56px;gap:8px}
+.ch-label{font-family:var(--mono);font-size:9px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.08em}
+.ch-node{width:34px;height:34px;border-radius:50%;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:14px;transition:all .4s}
+.ch-node.lit{border-color:var(--accent);box-shadow:0 0 12px rgba(88,166,255,.3);background:rgba(88,166,255,.08)}
+.ch-node.received{border-color:var(--green);box-shadow:0 0 10px rgba(63,185,80,.3)}
+.ch-pipe{width:2px;height:44px;background:var(--border);border-radius:2px;position:relative;overflow:hidden}
+.ch-pipe::after{content:'';position:absolute;top:-100%;left:0;width:100%;height:35%;border-radius:2px;background:linear-gradient(to bottom,transparent,var(--accent),transparent);opacity:0}
+.ch-pipe.flowing::after{opacity:1;animation:flow .55s ease-in-out forwards}
+.ch-pipe.flow2::after{background:linear-gradient(to bottom,transparent,var(--green),transparent)}
+@keyframes flow{0%{top:-100%;opacity:1}100%{top:200%;opacity:0}}
+
+/* ── Result ── */
+.result-panel{border-radius:14px;padding:20px 24px;display:none;align-items:flex-start;gap:14px;animation:slideUp .35s cubic-bezier(.16,1,.3,1) both}
+.result-panel.show{display:flex}
+@keyframes slideUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+.result-panel.success{background:var(--green-bg);border:1px solid var(--green-border)}
+.result-panel.danger{background:var(--red-bg);border:1px solid var(--red-border)}
+.result-panel.warning{background:var(--yellow-bg);border:1px solid var(--yellow-border)}
+.result-icon-wrap{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+.success .result-icon-wrap{background:rgba(63,185,80,.15)}
+.danger  .result-icon-wrap{background:rgba(248,81,73,.15)}
+.warning .result-icon-wrap{background:rgba(210,153,34,.15)}
+.result-title{font-size:16px;font-weight:800;letter-spacing:-.01em;margin-bottom:4px}
+.success .result-title{color:var(--green)}
+.danger  .result-title{color:var(--red)}
+.warning .result-title{color:var(--yellow)}
+.result-desc{font-family:var(--mono);font-size:11px;color:var(--text-muted);line-height:1.65}
+.compare-table{margin-top:12px;border:1px solid var(--border);border-radius:9px;overflow:hidden;font-family:var(--mono);font-size:10.5px}
+.compare-row{display:grid;grid-template-columns:108px 1fr}
+.compare-row+.compare-row{border-top:1px solid var(--border)}
+.compare-key{padding:9px 11px;background:var(--surface2);color:var(--text-muted);font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:9px;display:flex;align-items:center;border-right:1px solid var(--border)}
+.compare-val{padding:9px 11px;word-break:break-all;line-height:1.65}
+.match{color:var(--green)} .mismatch{color:var(--red)}
+
+footer{text-align:center;margin-top:50px;font-family:var(--mono);font-size:10.5px;color:var(--text-dim);letter-spacing:.05em}
+footer span{color:var(--text-muted)}
+</style>
+</head>
+<body>
+<div class="wrapper">
+
+<!-- Header -->
+<header>
+  <div class="logo-badge"><div class="logo-dot"></div>cryptographic verification tool</div>
+  <h1>Message <span>Integrity</span><br/>Checker</h1>
+  <p class="subtitle">// hash-based tamper detection</p>
+</header>
+
+<!-- Algo -->
+<div class="algo-bar">
+  <span style="font-family:var(--mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em">Algorithm</span>
+  <div class="algo-toggle">
+    <button class="algo-btn active" id="btn-md5"  onclick="setAlgo('MD5')">MD5</button>
+    <button class="algo-btn"        id="btn-sha1" onclick="setAlgo('SHA-1')">SHA-1</button>
+  </div>
+  <span class="algo-info" id="algo-info">128-bit · 32 hex chars</span>
+</div>
+
+<!-- Intercept -->
+<div class="intercept-bar">
+  <span style="font-family:var(--mono);font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.08em">Simulate attack:</span>
+  <div class="intercept-toggle" id="intercept-toggle" onclick="toggleIntercept()">
+    <div class="intercept-led"></div>
+    <span id="intercept-text">Intercept OFF</span>
+  </div>
+  <span style="font-family:var(--mono);font-size:9px;color:var(--text-dim)">tampers data mid-transmission</span>
+</div>
+
+<!-- Layout -->
+<div class="main-layout">
+
+  <!-- SENDER -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon sender">📤</div>
+      <div><div class="card-title">Sender</div><div class="card-sub">COMPOSE · HASH · APPEND · SEND</div></div>
+    </div>
+    <div class="card-body">
+
+      <div class="field">
+        <label>Message</label>
+        <textarea id="sender-msg" rows="4" placeholder="Type your message here..."></textarea>
+      </div>
+
+      <button class="btn btn-primary" onclick="generateDigest()">⚡ Generate Digest</button>
+
+      <div class="field" style="margin-top:15px">
+        <label>Generated Digest · <span id="algo-lbl" style="color:var(--accent2)">MD5</span></label>
+        <div class="digest-box empty" id="sender-digest">awaiting input...</div>
+      </div>
+
+      <!-- Appended preview -->
+      <div class="field" style="margin-bottom:0">
+        <label>Appended Packet <span style="color:var(--text-dim)">(message + digest)</span></label>
+        <div class="appended-preview" id="appended-preview">
+          <div class="appended-preview-header">
+            <span class="preview-label">packet preview</span>
+            <span class="preview-badge" id="preview-badge">not ready</span>
+          </div>
+          <div class="appended-content" id="appended-content">Generate a digest to see the appended packet.</div>
+        </div>
+      </div>
+
+      <button class="btn btn-send" id="send-btn" onclick="sendToReceiver()" disabled>
+        📡 Send Packet to Receiver
+      </button>
+
+    </div>
+  </div>
+
+  <!-- Channel -->
+  <div class="channel-col">
+    <div class="ch-label">tx</div>
+    <div class="ch-node" id="ch-top">🔗</div>
+    <div class="ch-pipe" id="ch-pipe1"></div>
+    <div class="ch-node" id="ch-mid" style="font-size:10px;color:var(--text-dim)">···</div>
+    <div class="ch-pipe" id="ch-pipe2"></div>
+    <div class="ch-node" id="ch-bot">📶</div>
+    <div class="ch-label">rx</div>
+  </div>
+
+  <!-- RECEIVER -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-icon receiver">📥</div>
+      <div><div class="card-title">Receiver</div><div class="card-sub">RECEIVE · INSPECT · VERIFY</div></div>
+    </div>
+    <div class="card-body">
+
+      <div class="recv-badge" id="recv-badge">
+        <div class="badge-dot"></div>
+        <span id="recv-badge-text">Packet received</span>
+      </div>
+
+      <div class="recv-packet-wrap">
+        <div class="recv-header-row">
+          <label>Received Packet <span style="color:var(--text-dim)">(message + digest)</span></label>
+          <span class="recv-edit-hint" id="edit-hint">
+            <span class="edit-dot"></span>
+            editable — modify to test
+          </span>
+        </div>
+
+        <textarea
+          class="recv-textarea"
+          id="recv-packet"
+          disabled
+          placeholder="Waiting for packet transmission...&#10;&#10;Once received, the full appended packet&#10;(message + digest) will appear here.&#10;You can edit it to test tampering detection."
+          spellcheck="false"
+        ></textarea>
+
+        <div class="format-guide" id="format-guide">
+          Format: <code>&lt;message&gt;||&lt;digest&gt;</code> — the separator <code>||</code> splits message from digest
+        </div>
+
+        <button class="reset-link" id="reset-link" onclick="resetReceiver()">↺ clear packet</button>
+      </div>
+
+      <button class="btn btn-verify" id="verify-btn" onclick="verifyIntegrity()" disabled>
+        🔒 Verify Integrity
+      </button>
+
+    </div>
+  </div>
+
+</div><!-- /main-layout -->
+
+<!-- Result -->
+<div class="result-panel" id="result-panel">
+  <div class="result-icon-wrap" id="result-icon"></div>
+  <div style="flex:1">
+    <div class="result-title" id="result-title"></div>
+    <div class="result-desc"  id="result-desc"></div>
+    <div class="compare-table" id="compare-table" style="display:none"></div>
+  </div>
+</div>
+
+<footer>
+  <span>MD5</span> · 128-bit &nbsp;|&nbsp; <span>SHA-1</span> · 160-bit &nbsp;|&nbsp;
+  All computation is <span>client-side</span> · no data leaves your browser
+</footer>
+</div>
+
+<script>
+/* ── State ─────────────────────── */
+let currentAlgo = 'MD5';
+let lastDigest  = '';
+let interceptOn = false;
+let transmitted = false;
+const SEP = '||';   // separator appended between message and digest
+
+/* ── Algo ──────────────────────── */
+function setAlgo(algo) {
+  currentAlgo = algo;
+  document.getElementById('btn-md5').classList.toggle('active',  algo==='MD5');
+  document.getElementById('btn-sha1').classList.toggle('active', algo==='SHA-1');
+  document.getElementById('algo-info').textContent = algo==='MD5' ? '128-bit · 32 hex chars' : '160-bit · 40 hex chars';
+  document.getElementById('algo-lbl').textContent  = algo;
+  const msg = document.getElementById('sender-msg').value;
+  if (msg && lastDigest) generateDigest();
+}
+
+/* ── Intercept ─────────────────── */
+function toggleIntercept() {
+  interceptOn = !interceptOn;
+  document.getElementById('intercept-toggle').classList.toggle('on', interceptOn);
+  document.getElementById('intercept-text').textContent = interceptOn ? 'Intercept ON' : 'Intercept OFF';
+}
+
+/* ── MD5 ───────────────────────── */
+function md5(str) {
+  function sa(x,y){const l=(x&0xFFFF)+(y&0xFFFF),m=(x>>16)+(y>>16)+(l>>16);return(m<<16)|(l&0xFFFF)}
+  function rol(n,c){return(n<<c)|(n>>>(32-c))}
+  function cmn(q,a,b,x,s,t){return sa(rol(sa(sa(a,q),sa(x,t)),s),b)}
+  const ff=(a,b,c,d,x,s,t)=>cmn((b&c)|((~b)&d),a,b,x,s,t);
+  const gg=(a,b,c,d,x,s,t)=>cmn((b&d)|(c&(~d)),a,b,x,s,t);
+  const hh=(a,b,c,d,x,s,t)=>cmn(b^c^d,a,b,x,s,t);
+  const ii=(a,b,c,d,x,s,t)=>cmn(c^(b|(~d)),a,b,x,s,t);
+  const s8=unescape(encodeURIComponent(str)),l=s8.length;
+  const x=Array(Math.ceil(l/4)+1).fill(0);
+  for(let i=0;i<l;i++)x[i>>2]|=s8.charCodeAt(i)<<((i%4)*8);
+  x[l>>2]|=0x80<<((l%4)*8);x[14+(((l+8)>>6)<<4)]=l*8;
+  let[a,b,c,d]=[1732584193,-271733879,-1732584194,271733878];
+  for(let i=0;i<x.length;i+=16){
+    let[A,B,C,D]=[a,b,c,d];
+    a=ff(a,b,c,d,x[i],7,-680876936);d=ff(d,a,b,c,x[i+1],12,-389564586);c=ff(c,d,a,b,x[i+2],17,606105819);b=ff(b,c,d,a,x[i+3],22,-1044525330);
+    a=ff(a,b,c,d,x[i+4],7,-176418897);d=ff(d,a,b,c,x[i+5],12,1200080426);c=ff(c,d,a,b,x[i+6],17,-1473231341);b=ff(b,c,d,a,x[i+7],22,-45705983);
+    a=ff(a,b,c,d,x[i+8],7,1770035416);d=ff(d,a,b,c,x[i+9],12,-1958414417);c=ff(c,d,a,b,x[i+10],17,-42063);b=ff(b,c,d,a,x[i+11],22,-1990404162);
+    a=ff(a,b,c,d,x[i+12],7,1804603682);d=ff(d,a,b,c,x[i+13],12,-40341101);c=ff(c,d,a,b,x[i+14],17,-1502002290);b=ff(b,c,d,a,x[i+15],22,1236535329);
+    a=gg(a,b,c,d,x[i+1],5,-165796510);d=gg(d,a,b,c,x[i+6],9,-1069501632);c=gg(c,d,a,b,x[i+11],14,643717713);b=gg(b,c,d,a,x[i],20,-373897302);
+    a=gg(a,b,c,d,x[i+5],5,-701558691);d=gg(d,a,b,c,x[i+10],9,38016083);c=gg(c,d,a,b,x[i+15],14,-660478335);b=gg(b,c,d,a,x[i+4],20,-405537848);
+    a=gg(a,b,c,d,x[i+9],5,568446438);d=gg(d,a,b,c,x[i+14],9,-1019803690);c=gg(c,d,a,b,x[i+3],14,-187363961);b=gg(b,c,d,a,x[i+8],20,1163531501);
+    a=gg(a,b,c,d,x[i+13],5,-1444681467);d=gg(d,a,b,c,x[i+2],9,-51403784);c=gg(c,d,a,b,x[i+7],14,1735328473);b=gg(b,c,d,a,x[i+12],20,-1926607734);
+    a=hh(a,b,c,d,x[i+5],4,-378558);d=hh(d,a,b,c,x[i+8],11,-2022574463);c=hh(c,d,a,b,x[i+11],16,1839030562);b=hh(b,c,d,a,x[i+14],23,-35309556);
+    a=hh(a,b,c,d,x[i+1],4,-1530992060);d=hh(d,a,b,c,x[i+4],11,1272893353);c=hh(c,d,a,b,x[i+7],16,-155497632);b=hh(b,c,d,a,x[i+10],23,-1094730640);
+    a=hh(a,b,c,d,x[i+13],4,681279174);d=hh(d,a,b,c,x[i],11,-358537222);c=hh(c,d,a,b,x[i+3],16,-722521979);b=hh(b,c,d,a,x[i+6],23,76029189);
+    a=hh(a,b,c,d,x[i+9],4,-640364487);d=hh(d,a,b,c,x[i+12],11,-421815835);c=hh(c,d,a,b,x[i+15],16,530742520);b=hh(b,c,d,a,x[i+2],23,-995338651);
+    a=ii(a,b,c,d,x[i],6,-198630844);d=ii(d,a,b,c,x[i+7],10,1126891415);c=ii(c,d,a,b,x[i+14],15,-1416354905);b=ii(b,c,d,a,x[i+5],21,-57434055);
+    a=ii(a,b,c,d,x[i+12],6,1700485571);d=ii(d,a,b,c,x[i+3],10,-1894986606);c=ii(c,d,a,b,x[i+10],15,-1051523);b=ii(b,c,d,a,x[i+1],21,-2054922799);
+    a=ii(a,b,c,d,x[i+8],6,1873313359);d=ii(d,a,b,c,x[i+15],10,-30611744);c=ii(c,d,a,b,x[i+6],15,-1560198380);b=ii(b,c,d,a,x[i+13],21,1309151649);
+    a=ii(a,b,c,d,x[i+4],6,-145523070);d=ii(d,a,b,c,x[i+11],10,-1120210379);c=ii(c,d,a,b,x[i+2],15,718787259);b=ii(b,c,d,a,x[i+9],21,-343485551);
+    a=sa(a,A);b=sa(b,B);c=sa(c,C);d=sa(d,D);
+  }
+  return[a,b,c,d].map(n=>{let s='';for(let j=0;j<4;j++)s+=('0'+((n>>(j*8))&0xff).toString(16)).slice(-2);return s}).join('');
+}
+
+async function sha1(msg){
+  const buf=await crypto.subtle.digest('SHA-1',new TextEncoder().encode(msg));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function computeDigest(msg){return currentAlgo==='MD5'?md5(msg):await sha1(msg)}
+
+/* ── Generate Digest ───────────── */
+async function generateDigest() {
+  const msg  = document.getElementById('sender-msg').value;
+  const box  = document.getElementById('sender-digest');
+  const sBtn = document.getElementById('send-btn');
+  const ac   = document.getElementById('appended-content');
+  const pb   = document.getElementById('preview-badge');
+
+  if (!msg.trim()) {
+    box.textContent='Please enter a message first.';
+    box.className='digest-box empty';
+    sBtn.disabled=true;
+    ac.innerHTML='Generate a digest to see the appended packet.';
+    ac.className='appended-content';
+    pb.textContent='not ready';
+    return;
+  }
+
+  box.className='digest-box generating';
+  box.textContent='computing...';
+  sBtn.disabled=true;
+  ac.className='appended-content';
+  ac.textContent='computing...';
+
+  await new Promise(r=>setTimeout(r,150));
+  const digest=await computeDigest(msg);
+  lastDigest=digest;
+
+  box.className='digest-box';
+  box.textContent=digest;
+
+  /* Build appended preview with colour spans */
+  const safeMsg    = escHtml(msg);
+  const safeSep    = escHtml(SEP);
+  const safeDigest = escHtml(digest);
+  ac.innerHTML = `<span class="msg-part">${safeMsg}</span><span class="sep-part">${safeSep}</span><span class="dgst-part">${safeDigest}</span>`;
+  ac.className='appended-content ready';
+  pb.textContent='ready to send';
+
+  sBtn.disabled=false;
+  sBtn.textContent='📡 Send Packet to Receiver';
+  sBtn.classList.remove('sent');
+
+  if (transmitted) resetReceiver(false);
+  document.getElementById('result-panel').classList.remove('show');
+}
+
+/* ── Send Packet ───────────────── */
+async function sendToReceiver() {
+  const msg    = document.getElementById('sender-msg').value;
+  const digest = lastDigest;
+  if (!msg||!digest) return;
+
+  const sBtn=document.getElementById('send-btn');
+  sBtn.disabled=true;
+  sBtn.textContent='📡 Transmitting...';
+
+  await animateChannel();
+
+  /* optionally tamper */
+  let deliveredMsg    = msg;
+  let deliveredDigest = digest;
+  let intercepted     = false;
+
+  if (interceptOn) {
+    if (Math.random()<0.5) {
+      deliveredMsg=msg+' [TAMPERED]';
+      intercepted='message';
+    } else {
+      const hex='0123456789abcdef';
+      const last=digest[digest.length-1];
+      deliveredDigest=digest.slice(0,-1)+hex[(hex.indexOf(last)+1)%16];
+      intercepted='digest';
+    }
+  }
+
+  /* append: message || digest → single string */
+  const packet = deliveredMsg + SEP + deliveredDigest;
+
+  /* populate receiver textarea */
+  const ta=document.getElementById('recv-packet');
+  ta.value   = packet;
+  ta.disabled= false;
+
+  /* show helpers */
+  document.getElementById('edit-hint').classList.add('show');
+  document.getElementById('format-guide').classList.add('show');
+  document.getElementById('reset-link').classList.add('show');
+
+  /* badge */
+  const badge=document.getElementById('recv-badge');
+  const bText=document.getElementById('recv-badge-text');
+  badge.className='recv-badge show'+(intercepted?' tampered':'');
+  bText.textContent=intercepted
+    ?`⚠ Intercepted! ${intercepted} was tampered in transit`
+    :'✓ Packet received — edit to simulate tampering, then verify';
+
+  document.getElementById('verify-btn').disabled=false;
+  transmitted=true;
+
+  sBtn.textContent='✓ Packet Sent';
+  sBtn.classList.add('sent');
+  document.getElementById('result-panel').classList.remove('show');
+
+  setTimeout(()=>document.getElementById('verify-btn').scrollIntoView({behavior:'smooth',block:'nearest'}),300);
+}
+
+/* ── Channel animation ─────────── */
+async function animateChannel(){
+  const pipe1=document.getElementById('ch-pipe1');
+  const pipe2=document.getElementById('ch-pipe2');
+  const mid=document.getElementById('ch-mid');
+  const bot=document.getElementById('ch-bot');
+  const top=document.getElementById('ch-top');
+  top.classList.add('lit');
+  pipe1.classList.add('flowing');
+  await new Promise(r=>setTimeout(r,350));
+  pipe1.classList.remove('flowing');
+  mid.classList.add('lit');
+  mid.textContent=interceptOn?'⚠':'📶';mid.style.fontSize='14px';
+  pipe2.classList.add('flowing','flow2');
+  await new Promise(r=>setTimeout(r,380));
+  pipe2.classList.remove('flowing','flow2');
+  bot.classList.add('received');
+  await new Promise(r=>setTimeout(r,600));
+  top.classList.remove('lit');mid.classList.remove('lit');
+  mid.textContent='···';mid.style.fontSize='10px';
+  bot.classList.remove('received');
+}
+
+/* ── Reset receiver ────────────── */
+function resetReceiver(resetSend=true){
+  const ta=document.getElementById('recv-packet');
+  ta.value='';ta.disabled=true;
+  document.getElementById('recv-badge').className='recv-badge';
+  document.getElementById('verify-btn').disabled=true;
+  document.getElementById('edit-hint').classList.remove('show');
+  document.getElementById('format-guide').classList.remove('show');
+  document.getElementById('reset-link').classList.remove('show');
+  document.getElementById('result-panel').classList.remove('show');
+  transmitted=false;
+  if (resetSend){
+    const sBtn=document.getElementById('send-btn');
+    sBtn.disabled=false;sBtn.textContent='📡 Send Packet to Receiver';sBtn.classList.remove('sent');
+  }
+}
+
+/* ── Verify ────────────────────── */
+async function verifyIntegrity(){
+  const raw=document.getElementById('recv-packet').value;
+
+  /* split on LAST occurrence of SEP so messages with || still work */
+  const idx=raw.lastIndexOf(SEP);
+  if (idx===-1){
+    showResult('warning','⚠️','Invalid Packet Format',
+      `Could not find the separator "${SEP}" in the received packet. Expected format: message${SEP}digest`,null);
+    return;
+  }
+
+  const recvMsg    = raw.slice(0,idx);
+  const recvDigest = raw.slice(idx+SEP.length).trim();
+
+  if (!recvMsg||!recvDigest){
+    showResult('warning','⚠️','Incomplete Packet','The message or digest part is empty after splitting.',null);
+    return;
+  }
+
+  const recomputed  = await computeDigest(recvMsg);
+  const origMsg     = document.getElementById('sender-msg').value;
+  const msgMatch    = recvMsg===origMsg;
+  const digestMatch = recomputed===recvDigest;
+
+  if (digestMatch&&msgMatch){
+    showResult('success','✅','Message Not Modified',
+      `Recomputed ${currentAlgo} digest matches exactly. The packet arrived intact — no tampering detected.`,
+      {recomputed,received:recvDigest,match:true});
+  } else if (!digestMatch&&msgMatch){
+    showResult('warning','⚠️','Digest Modified',
+      `Message content is unchanged, but the received digest doesn't match the recomputed one. The digest was tampered with in transit.`,
+      {recomputed,received:recvDigest,match:false});
+  } else {
+    showResult('danger','🚨','Message Modified',
+      `Recomputed ${currentAlgo} digest does not match the received digest. The message was altered or corrupted during transmission.`,
+      {recomputed,received:recvDigest,match:false});
+  }
+}
+
+function showResult(type,icon,title,desc,digests){
+  const panel=document.getElementById('result-panel');
+  panel.className=`result-panel show ${type}`;
+  document.getElementById('result-icon').textContent =icon;
+  document.getElementById('result-title').textContent=title;
+  document.getElementById('result-desc').textContent =desc;
+  const table=document.getElementById('compare-table');
+  if(digests){
+    table.style.display='block';
+    const cls=digests.match?'match':'mismatch';
+    table.innerHTML=`
+      <div class="compare-row">
+        <div class="compare-key">Recomputed</div>
+        <div class="compare-val ${cls}">${digests.recomputed}</div>
+      </div>
+      <div class="compare-row">
+        <div class="compare-key">Received</div>
+        <div class="compare-val ${cls}">${digests.received}</div>
+      </div>`;
+  }else{table.style.display='none'}
+  setTimeout(()=>panel.scrollIntoView({behavior:'smooth',block:'nearest'}),60);
+}
+
+function escHtml(s){
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* ── Sender resets on edit ─────── */
+document.getElementById('sender-msg').addEventListener('input',()=>{
+  document.getElementById('sender-digest').textContent='awaiting input...';
+  document.getElementById('sender-digest').className='digest-box empty';
+  const ac=document.getElementById('appended-content');
+  ac.innerHTML='Generate a digest to see the appended packet.';
+  ac.className='appended-content';
+  document.getElementById('preview-badge').textContent='not ready';
+  document.getElementById('send-btn').disabled=true;
+  document.getElementById('send-btn').textContent='📡 Send Packet to Receiver';
+  document.getElementById('send-btn').classList.remove('sent');
+  lastDigest='';
+  if(transmitted) resetReceiver(false);
+  document.getElementById('result-panel').classList.remove('show');
+});
+
+/* clear result on receiver edit */
+document.getElementById('recv-packet').addEventListener('input',()=>{
+  document.getElementById('result-panel').classList.remove('show');
+});
+</script>
+</body>
+</html>
